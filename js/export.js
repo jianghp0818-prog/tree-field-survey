@@ -7,6 +7,7 @@ import { PHOTO_KINDS, hasData, statusOf } from "./records.js";
 
 const CSV_COLUMNS = [
   ["Tree No.", (r) => r.no || r.key],
+  ["Number on Site", (r) => r.corrected_no],
   ["Northing", (r) => r.northing?.toFixed(3)],
   ["Easting", (r) => r.easting?.toFixed(3)],
   ["Status", (r) => r.status_label],
@@ -27,7 +28,7 @@ const CSV_COLUMNS = [
   ["Leaf Photo", (r) => r.photos.leaf],
   ["Bark Photo", (r) => r.photos.bark],
 ];
-const STATUS_EXPORT = { partial: "Started", done: "Complete", missing: "Not found", todo: "" };
+const STATUS_EXPORT = { partial: "Started", done: "Complete", missing: "Not found", todo: "", deleted: "Deleted" };
 
 function fileKey(key) {
   return key.replace(/\?/g, "Q").replace(/#/g, "-").replace(/[^\w.-]+/g, "_");
@@ -70,10 +71,11 @@ export async function buildResultsZip({ job, pack, records, mode, getPhoto, onPr
       photoCount += 1;
     }
     const { jobId, exported, photos: _ids, x: _x, y: _y, ...fields } = rec;
+    const status = rec.deleted ? "deleted" : statusOf(rec);
     out.push({
       ...fields,
-      status: statusOf(rec),
-      status_label: STATUS_EXPORT[statusOf(rec)],
+      status,
+      status_label: STATUS_EXPORT[status],
       easting: x == null ? null : Math.round((e0 + x) * 1000) / 1000,
       northing: y == null ? null : Math.round((n0 + y) * 1000) / 1000,
       photos,

@@ -5,12 +5,30 @@ export const STATUS_COLORS = { todo: "#e8590c", partial: "#f2b100", done: "#2b8a
 const TAP_RADIUS = 26;      // px: how close a tap must be to a tree
 const MIN_TEXT_PX = 7;      // background text smaller than this on screen is not drawn
 
+// OneMap (Singapore Land Authority) base map: 256 px Web Mercator tiles, zoom 11 to 19 (land lots to 20).
+// Tiles come straight from OneMap while online; they are not stored by the app.
+const ONEMAP_TILE = "https://www.onemap.gov.sg/maps/tiles/{style}/{z}/{x}/{y}.png";
+const ONEMAP_MIN_ZOOM = 11;
+const ONEMAP_MAX_ZOOM = { LandLot: 20 };
+const EARTH_CIRCUMFERENCE = 40075016.686;
+const MAX_TILES_KEPT = 400;
+const TILE_RETRY_MS = 30000;
+
+function tileLonLat(z, x, y) {
+  const n = 2 ** z;
+  return [x / n * 360 - 180, Math.atan(Math.sinh(Math.PI * (1 - 2 * y / n))) * 180 / Math.PI];
+}
+
 export class TopoMap {
-  constructor(canvas, { onTap, onMove } = {}) {
+  constructor(canvas, { onTap, onMove, onTileError } = {}) {
     this.canvas = canvas;
     this.ctx = canvas.getContext("2d");
     this.onTap = onTap || (() => {});
     this.onMove = onMove || (() => {});
+    this.onTileError = onTileError || (() => {});
+    this.geo = null;          // {toLonLat(x, y), fromLonLat(lon, lat)} for the base map
+    this.base = null;         // {on, style, opacity, contrast}
+    this.tiles = new Map();   // "style/z/x/y" -> {img, ok, failed}
     this.scale = 1;           // px per metre
     this.cx = 0;              // world point at the centre of the screen
     this.cy = 0;
@@ -44,6 +62,84 @@ export class TopoMap {
   setTrees(trees) {
     this.trees = trees;
     this.draw();
+  }
+
+  setGeo(geo) {
+    this.geo = geo;
+    this.draw();
+  }
+
+  setBasemap(base) {
+    this.base = { ...base };
+    this.draw();
+  }
+
+  // ---- OneMap base map
+  tile(style, z, x, y) {
+    const key = `${style}/${z}/${x}/${y}`;
+    let t = this.tiles.get(key);
+    const url = ONEMAP_TILE.replace("{style}", style).replace("{z}", z).replace("{x}", x).replace("{y}", y);
+    if (!t) {
+      t = { img: new Image(), ok: false, failed: 0 };
+      t.img.onload = () => {
+        t.ok = true;
+        this.draw();
+      };
+      t.img.onerror = () => {
+        t.failed = Date.now();
+        this.onTileError();
+      };
+      t.img.src = url;
+      this.tiles.set(key, t);
+      if (this.tiles.size > MAX_TILES_KEPT) this.tiles.delete(this.tiles.keys().next().value);
+    } else if (t.failed && Date.now() - t.failed > TILE_RETRY_MS) {
+      t.failed = 0;
+      t.img.src = `${url}?retry=${Date.now()}`;
+    }
+    return t;
+  }
+
+  drawBasemap(w, h) {
+    const { ctx, base, geo } = this;
+    const corners = [[0, 0], [w, 0], [0, h], [w, h]].map(([sx, sy]) => geo.toLonLat(...this.toWorld(sx, sy)));
+    const lons = corners.map((c) => c[0]), lats = corners.map((c) => c[1]);
+    const lat = (Math.min(...lats) + Math.max(...lats)) / 2;
+    const maxZoom = ONEMAP_MAX_ZOOM[base.style] || 19;
+    const ideal = Math.log2(EARTH_CIRCUMFERENCE * Math.cos(lat * Math.PI / 180) * this.scale / 256);
+    const z = Math.max(ONEMAP_MIN_ZOOM, Math.min(maxZoom, Math.round(ideal + 0.3)));
+    const n = 2 ** z;
+    const tx = (lon) => Math.floor((lon + 180) / 360 * n);
+    const ty = (la) => {
+      const r = la * Math.PI / 180;
+      return Math.floor((1 - Math.log(Math.tan(r) + 1 / Math.cos(r)) / Math.PI) / 2 * n);
+    };
+    const x0 = tx(Math.min(...lons)), x1 = tx(Math.max(...lons));
+    const y0 = ty(Math.max(...lats)), y1 = ty(Math.min(...lats));
+    if ((x1 - x0 + 1) * (y1 - y0 + 1) > 120) return;      // zoomed out beyond OneMap's range
+    ctx.save();
+    ctx.globalAlpha = base.opacity;
+    ctx.filter = `contrast(${base.contrast})`;
+    for (let x = x0; x <= x1; x++) {
+      for (let y = y0; y <= y1; y++) {
+        // tile corners from Web Mercator to SVY21; near Singapore the tile stays a rectangle to within millimetres
+        const [ax, ay] = this.toScreen(...geo.fromLonLat(...tileLonLat(z, x, y)));
+        const [bx, by] = this.toScreen(...geo.fromLonLat(...tileLonLat(z, x + 1, y + 1)));
+        const t = this.tile(base.style, z, x, y);
+        if (t.ok) {
+          ctx.drawImage(t.img, ax, ay, bx - ax, by - ay);
+          continue;
+        }
+        for (let d = 1; d <= 3 && z - d >= ONEMAP_MIN_ZOOM; d++) {     // a coarser tile until this one arrives
+          const p = this.tiles.get(`${base.style}/${z - d}/${x >> d}/${y >> d}`);
+          if (p?.ok) {
+            const k = 2 ** d, s = p.img.naturalWidth / k;
+            ctx.drawImage(p.img, (x % k) * s, (y % k) * s, s, s, ax, ay, bx - ax, by - ay);
+            break;
+          }
+        }
+      }
+    }
+    ctx.restore();
   }
 
   resize() {
@@ -145,6 +241,10 @@ export class TopoMap {
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.fillStyle = "#fbfcfb";
     ctx.fillRect(0, 0, canvas.width, canvas.height);
+    if (this.base?.on && this.geo) {
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      this.drawBasemap(w, h);
+    }
     const s = this.scale * dpr;
     const [vx0, vy1] = this.toWorld(0, 0);
     const [vx1, vy0] = this.toWorld(w, h);
@@ -276,7 +376,11 @@ export class TopoMap {
       return [e.clientX - rect.left, e.clientY - rect.top];
     };
     c.addEventListener("pointerdown", (e) => {
-      c.setPointerCapture(e.pointerId);
+      try {
+        c.setPointerCapture(e.pointerId);
+      } catch {
+        // capture is a convenience (keeps a drag going outside the map); taps work without it
+      }
       this.pointers.set(e.pointerId, pos(e));
       if (this.pointers.size === 1) {
         start = { p: pos(e), cx: this.cx, cy: this.cy };

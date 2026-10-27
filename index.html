@@ -58,12 +58,13 @@
     </div>
     <button class="btn" id="btn-list">Trees</button>
     <button class="btn" id="btn-locate" title="Show my position">Locate</button>
-    <button class="btn" id="btn-add">Add tree</button>
     <button class="btn primary" id="btn-export">Export</button>
   </header>
   <div class="map-wrap">
     <canvas id="map"></canvas>
     <div class="map-tools">
+      <button class="tool-btn" id="btn-layers" aria-label="Base map settings">Map</button>
+      <button class="tool-btn" id="btn-add" aria-label="Add a tree that is not in the drawing">+ Tree</button>
       <button class="icon-btn round" id="zoom-in" aria-label="Zoom in">+</button>
       <button class="icon-btn round" id="zoom-out" aria-label="Zoom out">&minus;</button>
       <button class="icon-btn round" id="zoom-fit" aria-label="Show all trees">&#9635;</button>
@@ -74,8 +75,26 @@
       <span><i class="dot done"></i>Complete</span>
       <span><i class="dot missing"></i>Not found</span>
     </div>
-    <div id="map-hint" class="map-hint" hidden></div>
+    <button id="map-hint" class="map-hint" type="button" hidden></button>
     <div id="coord" class="coord small"></div>
+    <div id="layers-panel" class="layers-panel" hidden>
+      <label class="check lp-head"><input type="checkbox" id="bm-on"> <b>OneMap base map</b></label>
+      <div class="filters" id="bm-styles">
+        <button class="chip" data-style="Grey">Grey</button>
+        <button class="chip" data-style="Default">Colour</button>
+        <button class="chip" data-style="Original">Original</button>
+        <button class="chip" data-style="LandLot">Land lots</button>
+      </div>
+      <label class="slider">Opacity <input type="range" id="bm-opacity" min="0.1" max="1" step="0.05"></label>
+      <label class="slider">Contrast <input type="range" id="bm-contrast" min="0.3" max="1.6" step="0.05"></label>
+      <p class="muted small">Shown only with an internet connection. Positions come from the survey drawing; the
+        base map can be a metre or two off.</p>
+    </div>
+    <div id="onemap-attr" class="attr" hidden>
+      <img src="https://www.onemap.gov.sg/web-assets/images/logo/om_logo.png" alt="" width="20" height="20">
+      <a href="https://www.onemap.gov.sg/" target="_blank" rel="noopener noreferrer">OneMap</a>&nbsp;&copy;&nbsp;contributors
+      &#124; <a href="https://www.sla.gov.sg/" target="_blank" rel="noopener noreferrer">Singapore Land Authority</a>
+    </div>
   </div>
 
   <!-- Tree list -->
@@ -105,6 +124,14 @@
     </div>
     <div class="form-body">
       <div id="f-check" class="note small" hidden></div>
+      <div id="f-new-tools" class="new-tools" hidden>
+        <span class="small">Added in the field. Position taken from the map.</span>
+        <button class="btn small" id="f-move" type="button">Move</button>
+        <button class="btn small danger" id="f-delete" type="button">Delete</button>
+      </div>
+      <label class="field" id="f-corrected-row">Number on site, if different from the drawing
+        <input id="f-corrected" class="input" autocomplete="off" placeholder="e.g. the number on the tree tag">
+      </label>
       <div class="photos">
         <div class="photo-slot" data-kind="whole">
           <div class="thumb"><span>Whole tree</span><img alt=""></div>

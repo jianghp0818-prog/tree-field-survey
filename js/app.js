@@ -8,9 +8,10 @@ import { PHOTO_KINDS, STATUS_LABELS, blankRecord, hasData, missingItems, species
 
 const $ = (sel) => document.querySelector(sel);
 const $$ = (sel) => [...document.querySelectorAll(sel)];
-const APP_VERSION = "0.2.0";     // change with CACHE in sw.js
+const APP_VERSION = "0.3.0";     // change with CACHE in sw.js
 const SVY21 = "+proj=tmerc +lat_0=1.366666666666667 +lon_0=103.8333333333333 +k=1 +x_0=28001.642 +y_0=38744.572 " +
   "+ellps=WGS84 +units=m +no_defs";
+const BASEMAP_DEFAULT = { on: false, style: "Grey", opacity: 0.8, contrast: 1 };
 
 const state = {
   job: null,          // {id, name, pack, packId, loadedAt}
@@ -19,12 +20,14 @@ const state = {
   trees: new Map(),   // tree key -> tree from the pack
   current: null,      // record shown in the form
   surveyor: "",
-  addMode: false,
+  mode: null,         // null, "add" (tap to place a new tree) or "move" (tap the new position of moveKey)
+  moveKey: null,
   addPoint: null,
   watchId: null,
   listFilter: "all",
   species: [],        // [{row, haystack}]
   thumbUrls: {},
+  basemap: { ...BASEMAP_DEFAULT },
 };
 let map;
 
@@ -52,12 +55,29 @@ function treeLabel(t) {
   return dup ? `${t.no} (${dup[1]})` : t.no;
 }
 
+// The number shown for a drawing tree: the one found on site (marked *) when it differs from the drawing.
+function displayLabel(t, rec) {
+  return rec?.corrected_no ? `${rec.corrected_no}*` : treeLabel(t);
+}
+
+// Is a tree number already taken by another tree (its number on site counts, not the drawing's)?
+function numberInUse(no, exceptKey = null) {
+  for (const t of state.pack.trees) {
+    if (t.key !== exceptKey && (state.records.get(t.key)?.corrected_no || t.no) === no) return true;
+  }
+  for (const r of state.records.values()) {
+    if (r.new && !r.deleted && r.key !== exceptKey && r.no === no) return true;
+  }
+  return false;
+}
+
 function normalize(s) {
   return (s || "").toLowerCase().replace(/['’]/g, "").replace(/×/g, "x").replace(/\s+/g, " ").trim();
 }
 
 // ---------------------------------------------------------------- home screen
 async function showHome() {
+  setMode(null);
   closeForm();
   stopLocate();
   state.job = null;
@@ -69,7 +89,7 @@ async function showHome() {
   list.innerHTML = "";
   $("#no-jobs").hidden = jobs.length > 0;
   for (const job of jobs) {
-    const records = await db.getRecords(job.id);
+    const records = (await db.getRecords(job.id)).filter((r) => !r.deleted);
     const done = records.filter((r) => statusOf(r) === "done").length;
     const started = records.filter((r) => hasData(r)).length;
     const li = document.createElement("li");
@@ -150,17 +170,21 @@ async function openJob(id) {
   $("#f-girth-label").textContent = `Girth at ${job.pack.form.girth_height.toFixed(1)} m (m)`;
   buildConditionButtons(job.pack.form.conditions);
   map.setPack(job.pack);
+  map.setGeo(makeGeo(job.pack.origin));
   map.selected = null;
   refreshTrees();
   history.replaceState(null, "", `#job=${encodeURIComponent(id)}`);
 }
 
 function mapTrees() {
-  const trees = state.pack.trees.map((t) => ({
-    key: t.key, label: treeLabel(t), x: t.x, y: t.y, status: statusOf(state.records.get(t.key)), isNew: false,
-  }));
+  const trees = state.pack.trees.map((t) => {
+    const rec = state.records.get(t.key);
+    return { key: t.key, label: displayLabel(t, rec), alt: t.no, x: t.x, y: t.y, status: statusOf(rec), isNew: false };
+  });
   for (const r of state.records.values()) {
-    if (r.new) trees.push({ key: r.key, label: r.no, x: r.x, y: r.y, status: statusOf(r), isNew: true });
+    if (r.new && !r.deleted) {
+      trees.push({ key: r.key, label: r.no, alt: "", x: r.x, y: r.y, status: statusOf(r), isNew: true });
+    }
   }
   return trees;
 }
@@ -184,9 +208,16 @@ function focusTree(t) {
 }
 
 function onMapTap({ tree, world }) {
-  if (state.addMode) {
-    setAddMode(false);
+  $("#layers-panel").hidden = true;
+  if (state.mode === "add") {
+    setMode(null);
     openAddDialog(world);
+    return;
+  }
+  if (state.mode === "move") {
+    const key = state.moveKey;
+    setMode(null);
+    moveTreeTo(key, world);
     return;
   }
   if (tree) {
@@ -211,7 +242,7 @@ function renderTreeList() {
   const trees = mapTrees().sort((a, b) => a.label.localeCompare(b.label, undefined, { numeric: true }));
   for (const t of trees) {
     if (state.listFilter !== "all" && t.status !== state.listFilter) continue;
-    if (q && !normalize(t.label).includes(q)) continue;
+    if (q && !normalize(`${t.label} ${t.alt}`).includes(q)) continue;
     const rec = state.records.get(t.key);
     const li = document.createElement("li");
     li.innerHTML = `<span class="status-chip ${t.status}"></span><span class="tno"></span><span class="tsp"></span>`;
@@ -269,7 +300,11 @@ function closeForm() {
 function fillForm() {
   const rec = state.current;
   const tree = state.trees.get(rec.key);
-  $("#f-title").textContent = `Tree ${tree ? treeLabel(tree) : rec.no}${rec.new ? " (added in field)" : ""}`;
+  $("#f-title").textContent = rec.new ? `Tree ${rec.no} (added in field)`
+    : rec.corrected_no ? `Tree ${rec.corrected_no} (drawing: ${treeLabel(tree)})` : `Tree ${treeLabel(tree)}`;
+  $("#f-new-tools").hidden = !rec.new;
+  $("#f-corrected-row").hidden = !!rec.new;
+  $("#f-corrected").value = rec.corrected_no || "";
   const pos = tree || rec;
   const { e, n } = absolute(pos.x, pos.y);
   $("#f-coords").textContent = `N ${fmt(n)}  E ${fmt(e)}`;
@@ -447,7 +482,19 @@ async function markDone() {
   const missing = missingItems(rec);
   if (missing.length && !confirm(`Still missing: ${missing.join(", ")}.\n\nMark this tree complete anyway?`)) return;
   await save({ status: "done" });
-  toast(`Tree ${rec.no || rec.key} complete`);
+  toast(`Tree ${rec.corrected_no || rec.no || rec.key} complete`);
+}
+
+// The number found on site, when the drawing has the wrong one. The drawing's number stays the tree's key.
+function setCorrected(value) {
+  const rec = state.current;
+  if (!rec || rec.new) return;
+  const tree = state.trees.get(rec.key);
+  let no = value.trim();
+  if (no === tree?.no) no = "";
+  if (no === (rec.corrected_no || "")) return;
+  if (no && numberInUse(no, rec.key)) toast(`Number ${no} is also used by another tree: please check.`, 6000);
+  save({ corrected_no: no }).then(fillForm);
 }
 
 async function markMissing() {
@@ -477,13 +524,57 @@ function nextTree() {
   openForm(t.key);
 }
 
-// ---------------------------------------------------------------- add a tree that is not in the drawing
-function setAddMode(on) {
-  state.addMode = on;
-  $("#btn-add").classList.toggle("on", on);
-  $("#map-hint").hidden = !on;
-  $("#map-hint").textContent = "Tap the map where the tree stands";
-  if (on) closeForm();
+// ---------------------------------------------------------------- trees added in the field: add, move, delete
+function setMode(mode, key = null) {
+  const cancelledMove = state.mode === "move" && !mode ? state.moveKey : null;
+  state.mode = mode;
+  state.moveKey = key;
+  $("#btn-add").classList.toggle("on", mode === "add");
+  const hint = $("#map-hint");
+  hint.hidden = !mode;
+  hint.textContent = mode === "add" ? "Tap the map where the tree stands  ·  Cancel"
+    : mode === "move" ? `Tap the new position of tree ${state.records.get(key)?.no}  ·  Cancel` : "";
+  if (mode) closeForm();
+  return cancelledMove;
+}
+
+function cancelMode() {
+  const key = setMode(null);
+  if (key) openForm(key);
+}
+
+function startMove() {
+  if (state.current?.new) setMode("move", state.current.key);
+}
+
+async function moveTreeTo(key, [x, y]) {
+  const rec = state.records.get(key);
+  if (!rec) return;
+  state.current = rec;
+  await save({ x: Math.round(x * 100) / 100, y: Math.round(y * 100) / 100 });
+  toast(`Tree ${rec.no} moved`);
+  openForm(key);
+}
+
+async function deleteNewTree() {
+  const rec = state.current;
+  if (!rec?.new) return;
+  if (!confirm(`Delete tree ${rec.no}, which was added in the field, and its photos from this tablet?`)) return;
+  closeForm();
+  for (const id of Object.values(rec.photos || {})) await db.deletePhoto(id);
+  if (rec.exported) {
+    // the office may already have this tree: keep a deletion note that goes out with the next export
+    const note = { ...blankRecord(rec.jobId, { key: rec.key, no: rec.no }), new: true, deleted: true,
+      x: rec.x, y: rec.y, created: rec.created, exported: rec.exported,
+      updated: new Date().toISOString(), surveyor: state.surveyor || rec.surveyor };
+    state.records.set(rec.key, note);
+    await db.putRecord(note);
+  } else {
+    state.records.delete(rec.key);
+    await db.deleteRecord(rec.jobId, rec.key);
+  }
+  refreshTrees();
+  toast(`Tree ${rec.no} deleted`);
 }
 
 function openAddDialog([x, y]) {
@@ -497,7 +588,8 @@ function openAddDialog([x, y]) {
 
 async function confirmAdd(event) {
   const no = $("#add-no").value.trim();
-  const taken = state.trees.has(no) || state.records.has(no) || state.pack.trees.some((t) => t.no === no);
+  const live = state.records.get(no);
+  const taken = state.trees.has(no) || (live && !live.deleted) || numberInUse(no);
   if (!no || taken) {
     event.preventDefault();
     $("#add-error").textContent = no ? `Tree ${no} already exists.` : "Enter a tree number.";
@@ -592,6 +684,39 @@ async function runExport(event) {
   }
 }
 
+// ---------------------------------------------------------------- OneMap base map
+function makeGeo([e0, n0]) {
+  return {
+    toLonLat: (x, y) => window.proj4(SVY21, "EPSG:4326", [e0 + x, n0 + y]),
+    fromLonLat: (lon, lat) => {
+      const [e, n] = window.proj4("EPSG:4326", SVY21, [lon, lat]);
+      return [e - e0, n - n0];
+    },
+  };
+}
+
+function applyBasemap(changes = null) {
+  if (changes) {
+    Object.assign(state.basemap, changes);
+    db.setSetting("basemap", state.basemap);
+  }
+  const b = state.basemap;
+  map.setBasemap(b);
+  $("#bm-on").checked = b.on;
+  $("#bm-opacity").value = b.opacity;
+  $("#bm-contrast").value = b.contrast;
+  $$("#bm-styles .chip").forEach((c) => c.classList.toggle("on", c.dataset.style === b.style));
+  $("#onemap-attr").hidden = !b.on;
+  $("#btn-layers").classList.toggle("on", b.on);
+}
+
+function onTileError() {
+  if (!state.basemap.on || Date.now() - (onTileError.last || 0) < 60000) return;
+  onTileError.last = Date.now();
+  toast(navigator.onLine ? "Some OneMap base map tiles could not be loaded." :
+    "No internet connection: the OneMap base map is not available. The drawing and trees still work.", 6000);
+}
+
 // ---------------------------------------------------------------- start
 async function openFromLink() {
   const params = new URLSearchParams(location.hash.slice(1));
@@ -632,8 +757,14 @@ function bind() {
     if (!panel.hidden) renderTreeList();
   };
   $("#btn-locate").onclick = toggleLocate;
-  $("#btn-add").onclick = () => setAddMode(!state.addMode);
+  $("#btn-add").onclick = () => (state.mode === "add" ? cancelMode() : setMode("add"));
+  $("#map-hint").onclick = cancelMode;
   $("#btn-export").onclick = openExport;
+  $("#btn-layers").onclick = () => ($("#layers-panel").hidden = !$("#layers-panel").hidden);
+  $("#bm-on").addEventListener("change", (e) => applyBasemap({ on: e.target.checked }));
+  $("#bm-opacity").addEventListener("input", (e) => applyBasemap({ opacity: Number(e.target.value) }));
+  $("#bm-contrast").addEventListener("input", (e) => applyBasemap({ contrast: Number(e.target.value) }));
+  $$("#bm-styles .chip").forEach((c) => (c.onclick = () => applyBasemap({ style: c.dataset.style, on: true })));
   $("#zoom-in").onclick = () => map.zoomBy(1.6);
   $("#zoom-out").onclick = () => map.zoomBy(1 / 1.6);
   $("#zoom-fit").onclick = () => map.fit(state.pack.view);
@@ -662,6 +793,9 @@ function bind() {
   $("#f-done").onclick = markDone;
   $("#f-missing").onclick = markMissing;
   $("#f-next").onclick = nextTree;
+  $("#f-corrected").addEventListener("change", (e) => setCorrected(e.target.value));
+  $("#f-move").onclick = startMove;
+  $("#f-delete").onclick = deleteNewTree;
   for (const slot of $$(".photo-slot")) {
     for (const input of slot.querySelectorAll("input[type=file]")) {
       input.addEventListener("change", (e) => {
@@ -693,8 +827,10 @@ async function start() {
   }
   $("#app-version").textContent = `Tree Field Survey ${APP_VERSION}`;
   state.surveyor = await db.getSetting("surveyor", "");
-  map = new TopoMap($("#map"), { onTap: onMapTap, onMove: showCoord });
+  state.basemap = { ...BASEMAP_DEFAULT, ...(await db.getSetting("basemap", {})) };
+  map = new TopoMap($("#map"), { onTap: onMapTap, onMove: showCoord, onTileError });
   bind();
+  applyBasemap();
   trackBarHeight();
   if (!(await openFromLink())) await showHome();
 }

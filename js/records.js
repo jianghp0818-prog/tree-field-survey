@@ -9,7 +9,9 @@ export function blankRecord(jobId, tree) {
     jobId,
     key: tree.key,
     no: tree.no || "",
-    new: false,
+    corrected_no: "",       // number found on site when the drawing's is wrong (drawing trees only)
+    new: false,             // added in the field; then x, y hold its position from the map
+    deleted: false,         // an added tree deleted after it was exported: tells the office to remove it
     species: null,          // {scientific_name, common_name, chinese_name, family} or {text} when typed freely
     height_m: null,
     girth_m: null,
@@ -28,7 +30,7 @@ export function blankRecord(jobId, tree) {
 
 export function hasData(rec) {
   if (!rec) return false;
-  return Boolean(rec.new || rec.species || rec.height_m != null || rec.girth_m != null || rec.crown_m != null ||
+  return Boolean(rec.new || rec.corrected_no || rec.species || rec.height_m != null || rec.girth_m != null || rec.crown_m != null ||
     rec.condition || rec.multi_stem || rec.remarks || Object.keys(rec.photos || {}).length || rec.status);
 }
 
