@@ -1,0 +1,212 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+  <meta name="theme-color" content="#1f5130">
+  <meta name="robots" content="noindex, nofollow">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Tree Survey">
+  <title>Tree Field Survey</title>
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icons/icon-192.png">
+  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+  <link rel="stylesheet" href="styles.css">
+  <script src="vendor/jszip.min.js" defer></script>
+  <script src="vendor/proj4.js" defer></script>
+  <script type="module" src="js/app.js"></script>
+</head>
+<body>
+
+<!-- Home: field packs on this device -->
+<section id="home" class="screen">
+  <header class="bar">
+    <img src="icons/icon-192.png" alt="" class="bar-logo">
+    <h1>Tree Field Survey</h1>
+  </header>
+  <main class="home-main">
+    <div class="card">
+      <h2>Open a field pack</h2>
+      <p class="muted">The office makes a field pack (<code>.treepack.json</code>) from the topographic survey
+        drawing. Save it on this tablet, then open it here.</p>
+      <label class="btn primary file-btn">Open field pack…
+        <input type="file" id="pack-file" hidden>
+      </label>
+    </div>
+    <div class="card">
+      <h2>Jobs on this tablet</h2>
+      <ul id="job-list" class="job-list"></ul>
+      <p id="no-jobs" class="muted">No jobs yet.</p>
+    </div>
+    <div class="card">
+      <h2>Surveyor</h2>
+      <input id="surveyor-home" class="input" placeholder="Your name (saved with each tree)" autocomplete="name">
+      <p id="storage-info" class="muted small"></p>
+      <p id="app-version" class="muted small"></p>
+    </div>
+  </main>
+</section>
+
+<!-- Map of one job -->
+<section id="survey" class="screen" hidden>
+  <header class="bar">
+    <button class="icon-btn" id="btn-home" title="Jobs" aria-label="Jobs">&#8592;</button>
+    <div class="bar-title">
+      <h1 id="job-title"></h1>
+      <div id="progress" class="small"></div>
+    </div>
+    <button class="btn" id="btn-list">Trees</button>
+    <button class="btn" id="btn-locate" title="Show my position">Locate</button>
+    <button class="btn" id="btn-add">Add tree</button>
+    <button class="btn primary" id="btn-export">Export</button>
+  </header>
+  <div class="map-wrap">
+    <canvas id="map"></canvas>
+    <div class="map-tools">
+      <button class="icon-btn round" id="zoom-in" aria-label="Zoom in">+</button>
+      <button class="icon-btn round" id="zoom-out" aria-label="Zoom out">&minus;</button>
+      <button class="icon-btn round" id="zoom-fit" aria-label="Show all trees">&#9635;</button>
+    </div>
+    <div class="legend small">
+      <span><i class="dot todo"></i>To do</span>
+      <span><i class="dot partial"></i>Started</span>
+      <span><i class="dot done"></i>Complete</span>
+      <span><i class="dot missing"></i>Not found</span>
+    </div>
+    <div id="map-hint" class="map-hint" hidden></div>
+    <div id="coord" class="coord small"></div>
+  </div>
+
+  <!-- Tree list -->
+  <aside id="tree-list-panel" class="panel left" hidden>
+    <div class="panel-head">
+      <input id="tree-search" class="input" placeholder="Find tree number" inputmode="search">
+      <button class="icon-btn" data-close="tree-list-panel" aria-label="Close">&times;</button>
+    </div>
+    <div class="filters" id="tree-filters">
+      <button class="chip on" data-filter="all">All</button>
+      <button class="chip" data-filter="todo">To do</button>
+      <button class="chip" data-filter="partial">Started</button>
+      <button class="chip" data-filter="done">Complete</button>
+    </div>
+    <ul id="tree-list" class="tree-list"></ul>
+  </aside>
+
+  <!-- Tree form -->
+  <aside id="form-panel" class="panel right" hidden>
+    <div class="panel-head">
+      <div>
+        <h2 id="f-title">Tree</h2>
+        <div id="f-coords" class="muted small"></div>
+      </div>
+      <span id="f-status" class="status-chip"></span>
+      <button class="icon-btn" id="f-close" aria-label="Close">&times;</button>
+    </div>
+    <div class="form-body">
+      <div id="f-check" class="note small" hidden></div>
+      <div class="photos">
+        <div class="photo-slot" data-kind="whole">
+          <div class="thumb"><span>Whole tree</span><img alt=""></div>
+          <div class="photo-btns">
+            <label class="btn small">Camera<input type="file" accept="image/*" capture="environment" hidden></label>
+            <label class="btn small">Gallery<input type="file" accept="image/*" hidden></label>
+            <button class="btn small ghost" data-remove>Remove</button>
+          </div>
+        </div>
+        <div class="photo-slot" data-kind="leaf">
+          <div class="thumb"><span>Leaf</span><img alt=""></div>
+          <div class="photo-btns">
+            <label class="btn small">Camera<input type="file" accept="image/*" capture="environment" hidden></label>
+            <label class="btn small">Gallery<input type="file" accept="image/*" hidden></label>
+            <button class="btn small ghost" data-remove>Remove</button>
+          </div>
+        </div>
+        <div class="photo-slot" data-kind="bark">
+          <div class="thumb"><span>Bark</span><img alt=""></div>
+          <div class="photo-btns">
+            <label class="btn small">Camera<input type="file" accept="image/*" capture="environment" hidden></label>
+            <label class="btn small">Gallery<input type="file" accept="image/*" hidden></label>
+            <button class="btn small ghost" data-remove>Remove</button>
+          </div>
+        </div>
+      </div>
+
+      <label class="field">Species
+        <div class="species-box">
+          <input id="f-species" class="input" placeholder="Common, scientific or Chinese name" autocomplete="off">
+          <ul id="species-results" class="species-results" hidden></ul>
+        </div>
+        <span id="f-species-picked" class="muted small"></span>
+      </label>
+
+      <div class="row3">
+        <label class="field">Height (m)
+          <input id="f-height" class="input" type="number" inputmode="decimal" step="0.1" min="0">
+        </label>
+        <label class="field"><span id="f-girth-label">Girth at 1.0 m (m)</span>
+          <input id="f-girth" class="input" type="number" inputmode="decimal" step="0.01" min="0">
+        </label>
+        <label class="field">Crown spread (m)
+          <input id="f-crown" class="input" type="number" inputmode="decimal" step="0.1" min="0">
+        </label>
+      </div>
+      <div id="f-warn" class="warn small"></div>
+
+      <div class="field">Condition
+        <div class="seg" id="f-condition"></div>
+      </div>
+
+      <label class="check"><input type="checkbox" id="f-multistem"> Multi-stem tree</label>
+
+      <label class="field">Remarks
+        <textarea id="f-remarks" class="input" rows="3"
+                  placeholder="e.g. leaning, cavity, near drain, girth measured below fork"></textarea>
+      </label>
+
+      <div class="saved muted small" id="f-saved"></div>
+    </div>
+    <div class="form-foot">
+      <button class="btn ghost" id="f-missing">Not found</button>
+      <button class="btn" id="f-next">Next tree</button>
+      <button class="btn primary" id="f-done">Mark complete</button>
+    </div>
+  </aside>
+</section>
+
+<!-- Dialogs -->
+<dialog id="export-dialog">
+  <form method="dialog">
+    <h2>Export results</h2>
+    <p class="muted">Makes a zip with the tree data and photos. On Android it is saved to Downloads: send it to the
+      office from the Files app (WhatsApp, Gmail, Drive).</p>
+    <label class="check"><input type="radio" name="export-mode" value="changed" checked>
+      <span>Trees changed since the last export (<b id="exp-changed">0</b>)</span></label>
+    <label class="check"><input type="radio" name="export-mode" value="all">
+      <span>All trees with data (<b id="exp-all">0</b>)</span></label>
+    <p id="exp-status" class="small"></p>
+    <div class="dialog-foot">
+      <button class="btn" value="cancel">Cancel</button>
+      <button class="btn primary" id="exp-go" value="default">Export</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="add-dialog">
+  <form method="dialog">
+    <h2>Add a tree not in the drawing</h2>
+    <p class="muted small" id="add-pos"></p>
+    <label class="field">Tree number
+      <input id="add-no" class="input" autocomplete="off" required>
+    </label>
+    <p id="add-error" class="warn small"></p>
+    <div class="dialog-foot">
+      <button class="btn" value="cancel">Cancel</button>
+      <button class="btn primary" id="add-go" value="default">Add</button>
+    </div>
+  </form>
+</dialog>
+
+<div id="toast" class="toast" hidden></div>
+</body>
+</html>
