@@ -1,10 +1,10 @@
 // Keeps the app working without a network: the newest version from the server when it answers within a few
 // seconds, otherwise the copy saved on the tablet. Field data is in IndexedDB, not in this cache.
 
-const CACHE = "treefield-0.3.0";   // change with APP_VERSION in js/app.js so tablets fetch the new version
+const CACHE = "treefield-0.4.0";   // change with APP_VERSION in js/app.js so tablets fetch the new version
 const SHELL = [
   "./", "index.html", "styles.css", "manifest.webmanifest",
-  "js/app.js", "js/db.js", "js/map.js", "js/photos.js", "js/export.js", "js/records.js",
+  "js/app.js", "js/db.js", "js/map.js", "js/photos.js", "js/export.js", "js/records.js", "js/identify.js",
   "vendor/jszip.min.js", "vendor/proj4.js",
   "icons/icon-192.png", "icons/icon-512.png", "icons/icon-maskable-512.png", "icons/apple-touch-icon.png",
 ];

@@ -4,11 +4,12 @@ import { db } from "./db.js";
 import { TopoMap } from "./map.js";
 import { compressPhoto } from "./photos.js";
 import { buildResultsZip, exportCandidates, shareOrDownload } from "./export.js";
+import { identifyAvailable, identifyOnline } from "./identify.js";
 import { PHOTO_KINDS, STATUS_LABELS, blankRecord, hasData, missingItems, speciesText, statusOf } from "./records.js";
 
 const $ = (sel) => document.querySelector(sel);
 const $$ = (sel) => [...document.querySelectorAll(sel)];
-const APP_VERSION = "0.3.0";     // change with CACHE in sw.js
+const APP_VERSION = "0.4.0";     // change with CACHE in sw.js
 const SVY21 = "+proj=tmerc +lat_0=1.366666666666667 +lon_0=103.8333333333333 +k=1 +x_0=28001.642 +y_0=38744.572 " +
   "+ellps=WGS84 +units=m +no_defs";
 const BASEMAP_DEFAULT = { on: false, style: "Grey", opacity: 0.8, contrast: 1 };
@@ -28,6 +29,9 @@ const state = {
   species: [],        // [{row, haystack}]
   thumbUrls: {},
   basemap: { ...BASEMAP_DEFAULT },
+  lastFix: null,      // latest GPS position while Locate is on: {e, n, acc, time}
+  target: null,       // tree key to navigate to
+  heading: null,      // compass heading of the tablet, degrees from north, when it has a compass
 };
 let map;
 
@@ -320,6 +324,7 @@ function fillForm() {
   $("#f-multistem").checked = !!rec.multi_stem;
   $("#f-remarks").value = rec.remarks || "";
   updateFormState();
+  showIdentify();
 }
 
 function updateFormState() {
@@ -347,8 +352,10 @@ function rangeWarnings(rec) {
 }
 
 async function save(changes) {
-  const rec = state.current;
-  if (!rec) return;
+  if (state.current) await saveRecord(state.current, changes);
+}
+
+async function saveRecord(rec, changes) {
   Object.assign(rec, changes);
   const now = new Date().toISOString();
   rec.updated = now;
@@ -356,8 +363,32 @@ async function save(changes) {
   if (state.surveyor) rec.surveyor = state.surveyor;
   state.records.set(rec.key, rec);
   await db.putRecord(rec);
-  updateFormState();
+  if (rec === state.current) updateFormState();
   refreshTrees();
+}
+
+// A GPS position taken next to the tree goes with the record, so the office can check the right tree was
+// recorded. Taken with the whole-tree photo and when the tree is marked complete; a better recent fix is kept.
+function fixFrom(pos) {
+  const [e, n] = window.proj4("EPSG:4326", SVY21, [pos.coords.longitude, pos.coords.latitude]);
+  return { e, n, acc: pos.coords.accuracy, time: pos.timestamp };
+}
+
+function recordGps(rec) {
+  if (!navigator.geolocation || !state.pack) return;
+  const keep = (fix) => {
+    if (state.records.get(rec.key) !== rec) return;
+    const old = rec.gps;
+    if (old && old.accuracy < fix.acc && Date.now() - Date.parse(old.time) < 10 * 60000) return;
+    saveRecord(rec, { gps: { easting: Math.round(fix.e * 1000) / 1000, northing: Math.round(fix.n * 1000) / 1000,
+      accuracy: Math.round(fix.acc), time: new Date(fix.time).toISOString() } });
+  };
+  if (state.lastFix && Date.now() - state.lastFix.time < 20000) {
+    keep(state.lastFix);
+    return;
+  }
+  navigator.geolocation.getCurrentPosition((pos) => keep(fixFrom(pos)), () => {},
+    { enableHighAccuracy: true, timeout: 20000, maximumAge: 20000 });
 }
 
 function numberInput(sel, field) {
@@ -401,7 +432,9 @@ async function addPhoto(kind, file) {
     await db.putPhoto({ id, jobId: rec.jobId, key: rec.key, kind, blob, width, height, taken: new Date().toISOString() });
     if (state.current !== rec) return;
     await save({ photos: { ...rec.photos, [kind]: id } });
+    if (kind === "whole") recordGps(rec);
     await showThumbs();
+    showIdentify();
     toast(`${kind === "whole" ? "Whole tree" : kind[0].toUpperCase() + kind.slice(1)} photo saved (${(blob.size / 1024).toFixed(0)} KB)`);
   } catch (err) {
     alert(`The photo could not be saved: ${err.message}`);
@@ -482,6 +515,7 @@ async function markDone() {
   const missing = missingItems(rec);
   if (missing.length && !confirm(`Still missing: ${missing.join(", ")}.\n\nMark this tree complete anyway?`)) return;
   await save({ status: "done" });
+  recordGps(rec);
   toast(`Tree ${rec.corrected_no || rec.no || rec.key} complete`);
 }
 
@@ -522,6 +556,127 @@ function nextTree() {
   const t = todo[0];
   focusTree(t);
   openForm(t.key);
+  if (state.watchId !== null) setTarget(t.key);
+}
+
+// ---------------------------------------------------------------- direction and distance to a tree
+const COMPASS = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"];
+
+function setTarget(key) {
+  state.target = key;
+  if (key && state.watchId === null) toggleLocate();
+  updateNav();
+}
+
+function updateNav() {
+  if (!map) return;
+  const t = state.target && state.pack ? mapTrees().find((tree) => tree.key === state.target) : null;
+  map.target = t ? { x: t.x, y: t.y } : null;
+  $("#nav-bar").hidden = !t;
+  map.draw();
+  if (t) updateNavText(t);
+}
+
+function updateNavText(t = mapTrees().find((tree) => tree.key === state.target)) {
+  if (!t) return;
+  const loc = map.location;
+  const arrow = $("#nav-arrow");
+  if (!loc) {
+    $("#nav-text").textContent = `${t.label}: waiting for GPS...`;
+    arrow.hidden = true;
+    return;
+  }
+  const dx = t.x - loc.x, dy = t.y - loc.y;
+  const dist = Math.hypot(dx, dy);
+  const bearing = (Math.atan2(dx, dy) * 180 / Math.PI + 360) % 360;
+  const distance = dist < 1000 ? `${dist.toFixed(0)} m` : `${(dist / 1000).toFixed(2)} km`;
+  const away = dist < Math.max(5, loc.acc) ? "you are at the tree"
+    : `${distance} ${COMPASS[Math.round(bearing / 45) % 8]} (${Math.round(bearing) % 360}°)`;
+  $("#nav-text").textContent = `${t.label}: ${away}${loc.acc > 15 ? `  ·  GPS ±${Math.round(loc.acc)} m` : ""}`;
+  arrow.hidden = false;
+  arrow.style.transform = `rotate(${state.heading === null ? bearing : bearing - state.heading}deg)`;
+}
+
+function watchCompass() {
+  window.addEventListener("deviceorientationabsolute", (e) => {
+    if (e.alpha === null) return;
+    state.heading = (360 - e.alpha + (screen.orientation?.angle || 0)) % 360;
+    if (state.target) updateNavText();
+  });
+}
+
+// ---------------------------------------------------------------- online species identification
+function showIdentify() {
+  const rec = state.current;
+  const box = $("#f-identify-box");
+  box.hidden = !identifyAvailable(state.pack);
+  if (box.hidden || !rec) return;
+  const hasPhoto = Boolean(rec.photos?.leaf || rec.photos?.bark);
+  $("#f-identify").disabled = !hasPhoto;
+  $("#f-identify-note").textContent = hasPhoto ? "Sends the leaf and bark photos" : "Take the leaf or bark photo first";
+  renderIdResults(rec);
+}
+
+function renderIdResults(rec) {
+  const ul = $("#id-results");
+  ul.innerHTML = "";
+  const s = rec.id_suggestions;
+  ul.hidden = !s;
+  $("#id-credit").hidden = !s;
+  if (!s) return;
+  if (!s.results.length) {
+    ul.innerHTML = "<li>No species recognised. Try a sharper close-up of the leaves.</li>";
+    return;
+  }
+  const inList = new Map(state.species.map((sp) => [sp.sci, sp.r]));
+  for (const r of s.results) {
+    const listed = inList.get(normalize(r.scientific_name));
+    const li = document.createElement("li");
+    li.innerHTML = `<span class="pct"></span><span class="names"><div><b></b> <span class="sci"></span></div></span>
+      <span class="tag"></span>`;
+    li.querySelector(".pct").textContent = `${Math.round(r.score * 100)}%`;
+    li.querySelector("b").textContent = listed?.common_name || r.common_name || "";
+    li.querySelector(".sci").textContent = r.scientific_name;
+    const tag = li.querySelector(".tag");
+    tag.textContent = listed ? "in species list" : "not in list";
+    tag.classList.toggle("in", Boolean(listed));
+    li.onclick = () => pickSpecies(listed
+      ? { scientific_name: listed.scientific_name, common_name: listed.common_name, chinese_name: listed.chinese_name,
+          family: listed.family }
+      : { scientific_name: r.scientific_name, common_name: r.common_name, chinese_name: "", family: r.family });
+    ul.appendChild(li);
+  }
+}
+
+async function runIdentify() {
+  const rec = state.current;
+  if (!rec) return;
+  if (!navigator.onLine) {
+    toast("No internet connection: identify later, or the office will identify it.");
+    return;
+  }
+  const photos = [];
+  for (const kind of ["leaf", "bark"]) {
+    const photo = rec.photos?.[kind] ? await db.getPhoto(rec.photos[kind]) : null;
+    if (photo) photos.push({ blob: photo.blob, organ: kind });
+  }
+  if (!photos.length) return;
+  const button = $("#f-identify");
+  button.disabled = true;
+  button.textContent = "Identifying...";
+  try {
+    const { results, remaining } = await identifyOnline(state.pack.species_id, photos);
+    if (state.current !== rec) return;
+    await save({ id_suggestions: { source: "Pl@ntNet", time: new Date().toISOString(),
+      organs: photos.map((p) => p.organ), results } });
+    renderIdResults(rec);
+    if (remaining !== null) $("#f-identify-note").textContent = `${remaining} identifications left today`;
+  } catch (err) {
+    toast(err.message, 6000);
+  } finally {
+    button.disabled = false;
+    button.textContent = "Identify online (Pl@ntNet)";
+  }
 }
 
 // ---------------------------------------------------------------- trees added in the field: add, move, delete
@@ -608,11 +763,13 @@ async function confirmAdd(event) {
 function stopLocate() {
   if (state.watchId !== null) navigator.geolocation.clearWatch(state.watchId);
   state.watchId = null;
+  state.lastFix = null;
   $("#btn-locate").classList.remove("on");
   if (map) {
     map.location = null;
     map.draw();
   }
+  updateNav();
 }
 
 function toggleLocate() {
@@ -627,9 +784,12 @@ function toggleLocate() {
   let first = true;
   $("#btn-locate").classList.add("on");
   state.watchId = navigator.geolocation.watchPosition((pos) => {
-    const [e, n] = window.proj4("EPSG:4326", SVY21, [pos.coords.longitude, pos.coords.latitude]);
+    const fix = fixFrom(pos);
+    state.lastFix = fix;
+    const { e, n } = fix;
     const [e0, n0] = state.pack.origin;
     map.location = { x: e - e0, y: n - n0, acc: pos.coords.accuracy };
+    updateNav();
     if (first) {
       first = false;
       map.centerOn(e - e0, n - n0, 2);
@@ -795,6 +955,9 @@ function bind() {
   $("#f-next").onclick = nextTree;
   $("#f-corrected").addEventListener("change", (e) => setCorrected(e.target.value));
   $("#f-move").onclick = startMove;
+  $("#f-goto").onclick = () => state.current && setTarget(state.current.key);
+  $("#nav-clear").onclick = () => setTarget(null);
+  $("#f-identify").onclick = runIdentify;
   $("#f-delete").onclick = deleteNewTree;
   for (const slot of $$(".photo-slot")) {
     for (const input of slot.querySelectorAll("input[type=file]")) {
@@ -830,6 +993,7 @@ async function start() {
   state.basemap = { ...BASEMAP_DEFAULT, ...(await db.getSetting("basemap", {})) };
   map = new TopoMap($("#map"), { onTap: onMapTap, onMove: showCoord, onTileError });
   bind();
+  watchCompass();
   applyBasemap();
   trackBarHeight();
   if (!(await openFromLink())) await showHome();

@@ -210,3 +210,27 @@ dialog::backdrop { background: rgba(0,0,0,.35); }
   .layers-panel { left: 12px; width: auto; }
   .form-foot .btn { padding: 0 6px; font-size: .9rem; white-space: normal; line-height: 1.1; }
 }
+
+/* ---- navigation to a tree */
+.nav-bar {
+  position: absolute; left: 50%; top: 10px; transform: translateX(-50%); z-index: 5; max-width: calc(100% - 24px);
+  display: flex; align-items: center; gap: 10px; padding: 4px 6px 4px 14px; border-radius: 24px;
+  background: #0b3d91; color: #fff; font-weight: 600; box-shadow: 0 2px 8px rgba(0,0,0,.25);
+}
+.nav-bar .icon-btn { color: #fff; min-height: 36px; min-width: 36px; }
+.nav-arrow { display: inline-block; font-size: 1.6rem; line-height: 1; transition: transform .2s; }
+.map-wrap:has(.nav-bar:not([hidden])) .map-hint { top: 62px; }
+
+/* ---- online species identification */
+.identify { display: grid; gap: 6px; }
+.identify .btn { justify-self: start; }
+.id-results { list-style: none; margin: 0; padding: 0; border: 1px solid var(--line); border-radius: 8px; }
+.id-results li { display: flex; align-items: center; gap: 10px; padding: 9px 12px; border-bottom: 1px solid #eef1ef;
+  cursor: pointer; }
+.id-results li:last-child { border-bottom: 0; }
+.id-results li:active { background: #eef4ef; }
+.id-results .pct { font-weight: 700; min-width: 44px; color: var(--green-2); }
+.id-results .names { flex: 1; min-width: 0; }
+.id-results .sci { font-style: italic; }
+.id-results .tag { font-size: .75rem; padding: 2px 8px; border-radius: 10px; background: #eef1ef; color: var(--muted); }
+.id-results .tag.in { background: #e3f2e6; color: var(--green); }

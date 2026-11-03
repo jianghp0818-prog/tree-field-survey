@@ -35,6 +35,7 @@ export class TopoMap {
     this.trees = [];          // [{key, label, x, y, status, isNew}]
     this.selected = null;
     this.location = null;     // {x, y, acc}
+    this.target = null;       // {x, y} of the tree being navigated to
     this.layers = [];
     this.texts = [];
     this.points = [];
@@ -313,6 +314,27 @@ export class TopoMap {
       ctx.fillRect(box[0], box[1], box[2] - box[0], 18);
       ctx.fillStyle = isSel ? "#0b3d91" : "#1b1f1d";
       ctx.fillText(t.label, lx, sy);
+    }
+
+    // the tree being navigated to, and a line to it from my position
+    if (this.target) {
+      const [tx, ty] = this.toScreen(this.target.x, this.target.y);
+      if (this.location) {
+        const [lx, ly] = this.toScreen(this.location.x, this.location.y);
+        ctx.setLineDash([8, 6]);
+        ctx.lineWidth = 3;
+        ctx.strokeStyle = "rgba(11,61,145,0.8)";
+        ctx.beginPath();
+        ctx.moveTo(lx, ly);
+        ctx.lineTo(tx, ty);
+        ctx.stroke();
+        ctx.setLineDash([]);
+      }
+      ctx.beginPath();
+      ctx.arc(tx, ty, r + 9, 0, Math.PI * 2);
+      ctx.lineWidth = 3;
+      ctx.strokeStyle = "#0b3d91";
+      ctx.stroke();
     }
 
     // my position

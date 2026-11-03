@@ -76,6 +76,11 @@
       <span><i class="dot missing"></i>Not found</span>
     </div>
     <button id="map-hint" class="map-hint" type="button" hidden></button>
+    <div id="nav-bar" class="nav-bar" hidden>
+      <span id="nav-arrow" class="nav-arrow" aria-hidden="true">&#8593;</span>
+      <span id="nav-text"></span>
+      <button id="nav-clear" class="icon-btn" type="button" aria-label="Stop navigation">&times;</button>
+    </div>
     <div id="coord" class="coord small"></div>
     <div id="layers-panel" class="layers-panel" hidden>
       <label class="check lp-head"><input type="checkbox" id="bm-on"> <b>OneMap base map</b></label>
@@ -118,6 +123,7 @@
       <div>
         <h2 id="f-title">Tree</h2>
         <div id="f-coords" class="muted small"></div>
+        <button class="btn small" id="f-goto" type="button">Navigate here</button>
       </div>
       <span id="f-status" class="status-chip"></span>
       <button class="icon-btn" id="f-close" aria-label="Close">&times;</button>
@@ -166,6 +172,13 @@
         </div>
         <span id="f-species-picked" class="muted small"></span>
       </label>
+      <div id="f-identify-box" class="identify" hidden>
+        <button class="btn small" id="f-identify" type="button">Identify online (Pl@ntNet)</button>
+        <span id="f-identify-note" class="muted small"></span>
+        <ul id="id-results" class="id-results" hidden></ul>
+        <div id="id-credit" class="muted small" hidden>Identification by Pl@ntNet (plantnet.org). Suggestions only:
+          the match rate is the model's confidence, not a guarantee.</div>
+      </div>
 
       <div class="row3">
         <label class="field">Height (m)

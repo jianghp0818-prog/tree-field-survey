@@ -23,10 +23,10 @@ async function decode(file) {
   }
 }
 
-export async function compressPhoto(file) {
+export async function compressPhoto(file, maxSide = MAX_SIDE, quality = QUALITY) {
   const image = await decode(file);
   const w0 = image.width, h0 = image.height;
-  const ratio = Math.min(1, MAX_SIDE / Math.max(w0, h0));
+  const ratio = Math.min(1, maxSide / Math.max(w0, h0));
   const width = Math.round(w0 * ratio), height = Math.round(h0 * ratio);
   const canvas = document.createElement("canvas");
   canvas.width = width;
@@ -34,6 +34,6 @@ export async function compressPhoto(file) {
   canvas.getContext("2d").drawImage(image, 0, 0, width, height);
   if (image.close) image.close();
   const blob = await new Promise((resolve, reject) =>
-    canvas.toBlob((b) => (b ? resolve(b) : reject(new Error("Photo could not be saved"))), "image/jpeg", QUALITY));
+    canvas.toBlob((b) => (b ? resolve(b) : reject(new Error("Photo could not be saved"))), "image/jpeg", quality));
   return { blob, width, height };
 }
