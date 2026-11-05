@@ -737,7 +737,7 @@ function renderIdHints(s) {
   const box = $("#id-hints");
   box.innerHTML = "";
   const lines = [];
-  if (s?.results?.length) {
+  if (s?.results?.length && confidence(s.results[0].score) !== "likely") {   // a likely species needs no family hint
     const hint = familyHint(s.results);
     if (hint) lines.push(["family", hint]);
   }
