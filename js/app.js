@@ -10,7 +10,7 @@ import { PHOTO_LABELS, STATUS_LABELS, THIRD_KINDS, blankRecord, hasData, missing
 
 const $ = (sel) => document.querySelector(sel);
 const $$ = (sel) => [...document.querySelectorAll(sel)];
-const APP_VERSION = "0.5.0";     // change with CACHE in sw.js
+const APP_VERSION = "0.5.1";     // change with CACHE in sw.js
 const SVY21 = "+proj=tmerc +lat_0=1.366666666666667 +lon_0=103.8333333333333 +k=1 +x_0=28001.642 +y_0=38744.572 " +
   "+ellps=WGS84 +units=m +no_defs";
 const BASEMAP_DEFAULT = { on: false, style: "Grey", opacity: 0.8, contrast: 1 };
@@ -409,6 +409,10 @@ function thirdKind(rec) {
   return thirdPhotoKind(rec) || rec.third_type || state.thirdType;
 }
 
+// The hint in an empty photo frame: what makes a photo Pl@ntNet can identify.
+const PHOTO_HINTS = { whole: "Tap to take a photo", leaf: "Close-up: a few leaves filling the frame",
+  flower: "Close-up of the flower", fruit: "Close-up of the fruit", bark: "Bark at chest height, close up" };
+
 function slotKind(slot, rec) {
   return slot === "third" ? thirdKind(rec) : slot;
 }
@@ -421,6 +425,7 @@ async function showThumbs() {
     const thumb = el.querySelector(".thumb");
     const img = thumb.querySelector("img");
     thumb.querySelector("b").textContent = PHOTO_LABELS[kind];
+    thumb.querySelector("small").textContent = PHOTO_HINTS[kind];
     if (state.thumbUrls[slot]) URL.revokeObjectURL(state.thumbUrls[slot]);
     state.thumbUrls[slot] = null;
     const id = rec.photos?.[kind];
@@ -452,7 +457,9 @@ async function addPhoto(slot, file) {
     const id = `${rec.jobId}|${rec.key}|${kind}`;
     await db.putPhoto({ id, jobId: rec.jobId, key: rec.key, kind, blob, width, height, taken: new Date().toISOString() });
     if (state.current !== rec) return;
-    await save({ photos: { ...rec.photos, [kind]: id } });
+    const changes = { photos: { ...rec.photos, [kind]: id } };
+    if (rec.id_suggestions?.sent?.includes(kind)) changes.id_suggestions = { ...rec.id_suggestions, stale: true };
+    await save(changes);
     if (kind === "whole") recordGps(rec);
     await showThumbs();
     showIdentify();
@@ -669,6 +676,7 @@ function renderIdResults(rec) {
   ul.hidden = !s;
   $("#id-credit").hidden = !s;
   renderIdHints(s);
+  $("#id-low").hidden = !s?.results?.length || confidence(s.results[0].score) === "likely";
   if (!s) return;
   if (!s.results.length) {
     ul.innerHTML = "<li>No species recognised. Try a sharper close-up of the leaves.</li>";
@@ -678,9 +686,12 @@ function renderIdResults(rec) {
   for (const r of s.results.slice(0, 3)) {
     const listed = inList.get(normalize(r.scientific_name));
     const li = document.createElement("li");
-    li.innerHTML = `<span class="pct"></span><span class="names"><div><b></b> <span class="sci"></span></div></span>
-      <span class="tag"></span>`;
-    li.querySelector(".pct").textContent = `${Math.round(r.score * 100)}%`;
+    const band = confidence(r.score);
+    li.className = `band-${band}`;
+    li.innerHTML = `<span class="pct"><span></span><small></small></span><span class="names"><div><b></b>
+      <span class="sci"></span></div></span><span class="tag"></span>`;
+    li.querySelector(".pct span").textContent = `${Math.round(r.score * 100)}%`;
+    li.querySelector(".pct small").textContent = band;
     li.querySelector("b").textContent = listed?.common_name || r.common_name || "";
     li.querySelector(".sci").textContent = r.scientific_name;
     const tag = li.querySelector(".tag");
@@ -694,9 +705,25 @@ function renderIdResults(rec) {
   }
 }
 
+// Confidence bands from the field pack (job.yaml species_id.likely / .possible); older packs: 40% and 20%.
+function confidence(score) {
+  const cfg = state.pack?.species_id || {};
+  if (score >= (cfg.likely ?? 0.4)) return "likely";
+  return score >= (cfg.possible ?? 0.2) ? "possible" : "unlikely";
+}
+
 // Under the suggestions: the family most of them share, and photos Pl@ntNet sees as a different organ.
-const ORGAN_WORDS = { leaf: "a leaf", flower: "a flower", fruit: "a fruit", bark: "bark", habit: "the whole plant",
+const ORGAN_WORDS = { leaf: "a leaf", flower: "a flower", fruit: "a fruit", bark: "bark", habit: "the whole tree",
   other: "something else" };
+const RETAKE_ADVICE = { leaf: "take a close-up of a few leaves and identify again.",
+  flower: "check the photo type, or take a close-up of the flower and identify again.",
+  fruit: "check the photo type, or take a close-up of the fruit and identify again.",
+  bark: "check the photo type, or take a close-up of the bark at chest height and identify again." };
+
+function retakePhoto(kind) {
+  const slot = kind === "leaf" ? "leaf" : "third";
+  $(`.photo-slot[data-slot="${slot}"] .thumb input`).click();
+}
 
 function familyHint(results) {
   const top = results.slice(0, 3).filter((r) => r.family);
@@ -714,16 +741,24 @@ function renderIdHints(s) {
     const hint = familyHint(s.results);
     if (hint) lines.push(["family", hint]);
   }
-  for (const o of s?.organs || []) {
-    if (o.sent && o.seen && o.seen !== o.sent && o.score >= 0.5) {
-      lines.push(["warn", `Pl@ntNet sees the ${PHOTO_LABELS[o.sent].toLowerCase()} photo as ${ORGAN_WORDS[o.seen] || o.seen}: ` +
-        "check the photo type, or retake it."]);
+  if (s?.stale) {
+    lines.push(["warn", "A photo was retaken after this identification: tap Identify online again."]);
+  } else {
+    for (const o of s?.organs || []) {
+      if (o.sent && o.seen && o.seen !== o.sent && o.score >= 0.5 && PHOTO_LABELS[o.sent]) {
+        lines.push(["warn tap", `The ${PHOTO_LABELS[o.sent].toLowerCase()} photo looks like ${ORGAN_WORDS[o.seen] || o.seen}: ` +
+          `${RETAKE_ADVICE[o.sent] || "retake it and identify again."} Tap here to retake.`, o.sent]);
+      }
     }
   }
-  for (const [cls, text] of lines) {
+  for (const [cls, text, retake] of lines) {
     const div = document.createElement("div");
     div.className = cls;
     div.textContent = text;
+    if (retake) {
+      div.setAttribute("role", "button");
+      div.onclick = () => retakePhoto(retake);
+    }
     box.appendChild(div);
   }
   box.hidden = !lines.length;

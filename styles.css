@@ -188,6 +188,8 @@ textarea.input { resize: vertical; }
 .third-type button.on { background: var(--green); color: #fff; }
 #id-hints { display: grid; gap: 4px; }
 #id-hints .family { color: var(--green); font-weight: 600; }
+#id-hints .tap { cursor: pointer; text-decoration: underline; text-underline-offset: 2px; padding: 4px 0; }
+#id-low { color: #9a5b00; font-weight: 600; margin-top: 6px; }
 .photo-btns .btn { flex: 1; padding: 0 6px; }
 
 .species-box { position: relative; }
@@ -243,7 +245,11 @@ dialog::backdrop { background: rgba(0,0,0,.35); }
   cursor: pointer; }
 .id-results li:last-child { border-bottom: 0; }
 .id-results li:active { background: #eef4ef; }
-.id-results .pct { font-weight: 700; min-width: 44px; color: var(--green-2); }
+.id-results .pct { font-weight: 700; min-width: 56px; display: grid; justify-items: start; line-height: 1.15; }
+.id-results .pct small { font-weight: 600; font-size: .7rem; }
+.id-results .band-likely .pct { color: var(--green-2); }
+.id-results .band-possible .pct { color: #b26a00; }
+.id-results .band-unlikely .pct { color: var(--muted); }
 .id-results .names { flex: 1; min-width: 0; }
 .id-results .sci { font-style: italic; }
 .id-results .tag { font-size: .75rem; padding: 2px 8px; border-radius: 10px; background: #eef1ef; color: var(--muted); }
