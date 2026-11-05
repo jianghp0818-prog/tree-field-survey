@@ -5,11 +5,12 @@ import { TopoMap } from "./map.js";
 import { compressPhoto } from "./photos.js";
 import { buildResultsZip, exportCandidates, shareOrDownload } from "./export.js";
 import { identifyAvailable, identifyOnline } from "./identify.js";
-import { PHOTO_KINDS, STATUS_LABELS, blankRecord, hasData, missingItems, speciesText, statusOf } from "./records.js";
+import { PHOTO_LABELS, STATUS_LABELS, THIRD_KINDS, blankRecord, hasData, missingItems, speciesText, statusOf,
+  thirdPhotoKind } from "./records.js";
 
 const $ = (sel) => document.querySelector(sel);
 const $$ = (sel) => [...document.querySelectorAll(sel)];
-const APP_VERSION = "0.4.0";     // change with CACHE in sw.js
+const APP_VERSION = "0.5.0";     // change with CACHE in sw.js
 const SVY21 = "+proj=tmerc +lat_0=1.366666666666667 +lon_0=103.8333333333333 +k=1 +x_0=28001.642 +y_0=38744.572 " +
   "+ellps=WGS84 +units=m +no_defs";
 const BASEMAP_DEFAULT = { on: false, style: "Grey", opacity: 0.8, contrast: 1 };
@@ -32,6 +33,7 @@ const state = {
   lastFix: null,      // latest GPS position while Locate is on: {e, n, acc, time}
   target: null,       // tree key to navigate to
   heading: null,      // compass heading of the tablet, degrees from north, when it has a compass
+  thirdType: "bark",  // type chosen last for the third photo: flower, fruit or bark
 };
 let map;
 
@@ -305,7 +307,8 @@ function fillForm() {
   const rec = state.current;
   const tree = state.trees.get(rec.key);
   $("#f-title").textContent = rec.new ? `Tree ${rec.no} (added in field)`
-    : rec.corrected_no ? `Tree ${rec.corrected_no} (drawing: ${treeLabel(tree)})` : `Tree ${treeLabel(tree)}`;
+    : rec.corrected_no ? `Tree ${rec.corrected_no} (${tree?.no ? `drawing: ${treeLabel(tree)}` : "no number in the drawing"})`
+      : `Tree ${treeLabel(tree)}`;
   $("#f-new-tools").hidden = !rec.new;
   $("#f-corrected-row").hidden = !!rec.new;
   $("#f-corrected").value = rec.corrected_no || "";
@@ -400,31 +403,49 @@ function numberInput(sel, field) {
 }
 
 // ---------------------------------------------------------------- photos
+// Three photo frames: whole tree, leaf, and a third one that is a flower, fruit or bark photo. Tapping a frame
+// opens the camera; a new photo replaces the old one only once it is taken.
+function thirdKind(rec) {
+  return thirdPhotoKind(rec) || rec.third_type || state.thirdType;
+}
+
+function slotKind(slot, rec) {
+  return slot === "third" ? thirdKind(rec) : slot;
+}
+
 async function showThumbs() {
   const rec = state.current;
-  for (const slot of $$(".photo-slot")) {
-    const kind = slot.dataset.kind;
-    const thumb = slot.querySelector(".thumb");
+  for (const el of $$(".photo-slot")) {
+    const slot = el.dataset.slot;
+    const kind = slotKind(slot, rec);
+    const thumb = el.querySelector(".thumb");
     const img = thumb.querySelector("img");
-    if (state.thumbUrls[kind]) URL.revokeObjectURL(state.thumbUrls[kind]);
-    state.thumbUrls[kind] = null;
+    thumb.querySelector("b").textContent = PHOTO_LABELS[kind];
+    if (state.thumbUrls[slot]) URL.revokeObjectURL(state.thumbUrls[slot]);
+    state.thumbUrls[slot] = null;
     const id = rec.photos?.[kind];
     const photo = id ? await db.getPhoto(id) : null;
     if (state.current !== rec) return;   // another tree was opened meanwhile
     if (photo) {
-      state.thumbUrls[kind] = URL.createObjectURL(photo.blob);
-      img.src = state.thumbUrls[kind];
+      state.thumbUrls[slot] = URL.createObjectURL(photo.blob);
+      img.src = state.thumbUrls[slot];
     } else {
       img.removeAttribute("src");
     }
     thumb.classList.toggle("has", !!photo);
-    slot.querySelector("[data-remove]").hidden = !photo;
+    el.querySelector("[data-remove]").hidden = !photo;
   }
+  $$("#third-type button").forEach((b) => b.classList.toggle("on", b.dataset.type === thirdKind(rec)));
 }
 
-async function addPhoto(kind, file) {
+async function addPhoto(slot, file) {
   const rec = state.current;
   if (!rec || !file) return;
+  if (THIRD_KINDS.includes(slot)) {                   // a type given directly: the third frame as that type
+    rec.third_type = slot;
+    slot = "third";
+  }
+  const kind = slotKind(slot, rec);
   toast("Saving photo…", 1500);
   try {
     const { blob, width, height } = await compressPhoto(file);
@@ -435,21 +456,43 @@ async function addPhoto(kind, file) {
     if (kind === "whole") recordGps(rec);
     await showThumbs();
     showIdentify();
-    toast(`${kind === "whole" ? "Whole tree" : kind[0].toUpperCase() + kind.slice(1)} photo saved (${(blob.size / 1024).toFixed(0)} KB)`);
+    toast(`${PHOTO_LABELS[kind]} photo saved (${(blob.size / 1024).toFixed(0)} KB)`);
   } catch (err) {
     alert(`The photo could not be saved: ${err.message}`);
   }
 }
 
-async function removePhoto(kind) {
+async function removePhoto(slot) {
   const rec = state.current;
+  const kind = rec && slotKind(slot, rec);
   const id = rec?.photos?.[kind];
-  if (!id || !confirm(`Remove the ${kind} photo of this tree?`)) return;
+  if (!id || !confirm(`Remove the ${PHOTO_LABELS[kind].toLowerCase()} photo of this tree?`)) return;
   await db.deletePhoto(id);
   const photos = { ...rec.photos };
   delete photos[kind];
   await save({ photos });
   await showThumbs();
+  showIdentify();
+}
+
+// The third photo's type can be changed before or after it is taken; the photo stays, only its label changes.
+async function setThirdType(type) {
+  const rec = state.current;
+  if (!rec) return;
+  state.thirdType = type;
+  db.setSetting("thirdType", type);
+  const old = thirdPhotoKind(rec);
+  if (old && old !== type) {
+    const photos = { ...rec.photos, [type]: rec.photos[old] };
+    delete photos[old];
+    await save({ photos, third_type: type });
+  } else if (state.records.has(rec.key)) {
+    await save({ third_type: type });
+  } else {
+    rec.third_type = type;
+  }
+  await showThumbs();
+  showIdentify();
 }
 
 // ---------------------------------------------------------------- species search
@@ -611,9 +654,11 @@ function showIdentify() {
   const box = $("#f-identify-box");
   box.hidden = !identifyAvailable(state.pack);
   if (box.hidden || !rec) return;
-  const hasPhoto = Boolean(rec.photos?.leaf || rec.photos?.bark);
+  const third = thirdPhotoKind(rec);
+  const hasPhoto = Boolean(rec.photos?.leaf || third);
   $("#f-identify").disabled = !hasPhoto;
-  $("#f-identify-note").textContent = hasPhoto ? "Sends the leaf and bark photos" : "Take the leaf or bark photo first";
+  $("#f-identify-note").textContent = !hasPhoto ? "Take the leaf photo, or a flower, fruit or bark photo, first"
+    : `Sends the ${[rec.photos?.leaf && "leaf", third && PHOTO_LABELS[third].toLowerCase()].filter(Boolean).join(" and ")} photo`;
   renderIdResults(rec);
 }
 
@@ -623,13 +668,14 @@ function renderIdResults(rec) {
   const s = rec.id_suggestions;
   ul.hidden = !s;
   $("#id-credit").hidden = !s;
+  renderIdHints(s);
   if (!s) return;
   if (!s.results.length) {
     ul.innerHTML = "<li>No species recognised. Try a sharper close-up of the leaves.</li>";
     return;
   }
   const inList = new Map(state.species.map((sp) => [sp.sci, sp.r]));
-  for (const r of s.results) {
+  for (const r of s.results.slice(0, 3)) {
     const listed = inList.get(normalize(r.scientific_name));
     const li = document.createElement("li");
     li.innerHTML = `<span class="pct"></span><span class="names"><div><b></b> <span class="sci"></span></div></span>
@@ -648,6 +694,41 @@ function renderIdResults(rec) {
   }
 }
 
+// Under the suggestions: the family most of them share, and photos Pl@ntNet sees as a different organ.
+const ORGAN_WORDS = { leaf: "a leaf", flower: "a flower", fruit: "a fruit", bark: "bark", habit: "the whole plant",
+  other: "something else" };
+
+function familyHint(results) {
+  const top = results.slice(0, 3).filter((r) => r.family);
+  const counts = {};
+  for (const r of top) counts[r.family] = (counts[r.family] || 0) + 1;
+  const [family, n] = Object.entries(counts).sort((a, b) => b[1] - a[1])[0] || [];
+  return n >= 2 ? `Most suggestions are in the family ${family}: the family is likely right even if the species is not.` : "";
+}
+
+function renderIdHints(s) {
+  const box = $("#id-hints");
+  box.innerHTML = "";
+  const lines = [];
+  if (s?.results?.length) {
+    const hint = familyHint(s.results);
+    if (hint) lines.push(["family", hint]);
+  }
+  for (const o of s?.organs || []) {
+    if (o.sent && o.seen && o.seen !== o.sent && o.score >= 0.5) {
+      lines.push(["warn", `Pl@ntNet sees the ${PHOTO_LABELS[o.sent].toLowerCase()} photo as ${ORGAN_WORDS[o.seen] || o.seen}: ` +
+        "check the photo type, or retake it."]);
+    }
+  }
+  for (const [cls, text] of lines) {
+    const div = document.createElement("div");
+    div.className = cls;
+    div.textContent = text;
+    box.appendChild(div);
+  }
+  box.hidden = !lines.length;
+}
+
 async function runIdentify() {
   const rec = state.current;
   if (!rec) return;
@@ -656,7 +737,7 @@ async function runIdentify() {
     return;
   }
   const photos = [];
-  for (const kind of ["leaf", "bark"]) {
+  for (const kind of ["leaf", thirdPhotoKind(rec)].filter(Boolean)) {
     const photo = rec.photos?.[kind] ? await db.getPhoto(rec.photos[kind]) : null;
     if (photo) photos.push({ blob: photo.blob, organ: kind });
   }
@@ -665,10 +746,10 @@ async function runIdentify() {
   button.disabled = true;
   button.textContent = "Identifying...";
   try {
-    const { results, remaining } = await identifyOnline(state.pack.species_id, photos);
+    const { results, organs, remaining } = await identifyOnline(state.pack.species_id, photos);
     if (state.current !== rec) return;
     await save({ id_suggestions: { source: "Pl@ntNet", time: new Date().toISOString(),
-      organs: photos.map((p) => p.organ), results } });
+      sent: photos.map((p) => p.organ), organs, results } });
     renderIdResults(rec);
     if (remaining !== null) $("#f-identify-note").textContent = `${remaining} identifications left today`;
   } catch (err) {
@@ -959,16 +1040,17 @@ function bind() {
   $("#nav-clear").onclick = () => setTarget(null);
   $("#f-identify").onclick = runIdentify;
   $("#f-delete").onclick = deleteNewTree;
-  for (const slot of $$(".photo-slot")) {
-    for (const input of slot.querySelectorAll("input[type=file]")) {
+  for (const el of $$(".photo-slot")) {
+    for (const input of el.querySelectorAll("input[type=file]")) {
       input.addEventListener("change", (e) => {
         const file = e.target.files[0];
         e.target.value = "";
-        addPhoto(slot.dataset.kind, file);
+        addPhoto(el.dataset.slot, file);
       });
     }
-    slot.querySelector("[data-remove]").onclick = () => removePhoto(slot.dataset.kind);
+    el.querySelector("[data-remove]").onclick = () => removePhoto(el.dataset.slot);
   }
+  $$("#third-type button").forEach((b) => (b.onclick = () => setThirdType(b.dataset.type)));
 
   $("#exp-go").addEventListener("click", runExport);
   $("#add-go").addEventListener("click", confirmAdd);
@@ -990,6 +1072,7 @@ async function start() {
   }
   $("#app-version").textContent = `Tree Field Survey ${APP_VERSION}`;
   state.surveyor = await db.getSetting("surveyor", "");
+  state.thirdType = await db.getSetting("thirdType", "bark");
   state.basemap = { ...BASEMAP_DEFAULT, ...(await db.getSetting("basemap", {})) };
   map = new TopoMap($("#map"), { onTap: onMapTap, onMove: showCoord, onTileError });
   bind();

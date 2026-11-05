@@ -168,12 +168,26 @@ textarea.input { resize: vertical; }
   position: relative; aspect-ratio: 3 / 4; border: 2px dashed var(--line); border-radius: 10px; overflow: hidden;
   display: flex; align-items: center; justify-content: center; background: #f7f9f7;
 }
+.thumb { cursor: pointer; }
 .thumb span { font-weight: 600; color: var(--muted); font-size: .85rem; text-align: center; padding: 4px; }
+.thumb-label { display: grid; gap: 2px; }
+.thumb-label small { font-weight: 400; font-size: .75rem; }
+.thumb.has .thumb-label small { display: none; }
 .thumb img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; display: none; }
 .thumb.has { border-style: solid; border-color: var(--green-2); }
 .thumb.has img { display: block; }
 .thumb.has span { position: absolute; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,.55); color: #fff; z-index: 1; }
 .photo-btns { display: flex; flex-wrap: wrap; gap: 4px; }
+.third-row { display: flex; align-items: center; gap: 10px; margin-top: 8px; }
+.third-row > span { font-weight: 600; font-size: .9rem; color: var(--muted); white-space: nowrap; }
+.third-type { flex: 1; display: grid; grid-template-columns: repeat(3, 1fr); border: 1px solid var(--line);
+  border-radius: 8px; overflow: hidden; }
+.third-type button { min-height: 42px; border: 0; border-right: 1px solid var(--line); background: #fff; font: inherit;
+  font-size: .9rem; font-weight: 600; cursor: pointer; padding: 0 4px; }
+.third-type button:last-child { border-right: 0; }
+.third-type button.on { background: var(--green); color: #fff; }
+#id-hints { display: grid; gap: 4px; }
+#id-hints .family { color: var(--green); font-weight: 600; }
 .photo-btns .btn { flex: 1; padding: 0 6px; }
 
 .species-box { position: relative; }

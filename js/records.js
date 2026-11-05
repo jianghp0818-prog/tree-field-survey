@@ -1,7 +1,8 @@
 // Field record helpers shared by the form, the map and the export.
 
-export const PHOTO_KINDS = ["whole", "leaf", "bark"];
-export const PHOTO_LABELS = { whole: "Whole tree", leaf: "Leaf", bark: "Bark" };
+export const PHOTO_KINDS = ["whole", "leaf", "flower", "fruit", "bark"];
+export const THIRD_KINDS = ["flower", "fruit", "bark"];        // the third photo is one of these
+export const PHOTO_LABELS = { whole: "Whole tree", leaf: "Leaf", flower: "Flower", fruit: "Fruit", bark: "Bark" };
 export const STATUS_LABELS = { todo: "To do", partial: "Started", done: "Complete", missing: "Not found" };
 
 export function blankRecord(jobId, tree) {
@@ -40,8 +41,13 @@ export function statusOf(rec) {
   return hasData(rec) ? "partial" : "todo";
 }
 
+export function thirdPhotoKind(rec) {
+  return THIRD_KINDS.find((k) => rec.photos?.[k]) || "";
+}
+
 export function missingItems(rec) {
-  const missing = PHOTO_KINDS.filter((k) => !rec.photos?.[k]).map((k) => `${PHOTO_LABELS[k].toLowerCase()} photo`);
+  const missing = ["whole", "leaf"].filter((k) => !rec.photos?.[k]).map((k) => `${PHOTO_LABELS[k].toLowerCase()} photo`);
+  if (!thirdPhotoKind(rec)) missing.push("flower, fruit or bark photo");
   if (!rec.species) missing.push("species");
   if (rec.height_m == null) missing.push("height");
   if (rec.girth_m == null) missing.push("girth");

@@ -1,9 +1,9 @@
 // Results zip for the office:
 //   results.json   format "treefield-results", the records with absolute SVY21 coordinates
 //   results.csv    the same as a table (opens in Excel)
-//   photos/        <tree>_whole.jpg, <tree>_leaf.jpg, <tree>_bark.jpg
+//   photos/        <tree>_whole.jpg, <tree>_leaf.jpg and <tree>_flower.jpg, _fruit.jpg or _bark.jpg
 
-import { PHOTO_KINDS, hasData, statusOf } from "./records.js";
+import { PHOTO_KINDS, THIRD_KINDS, hasData, statusOf } from "./records.js";
 
 const CSV_COLUMNS = [
   ["Tree No.", (r) => r.no || r.key],
@@ -26,7 +26,8 @@ const CSV_COLUMNS = [
   ["Last Saved", (r) => r.updated],
   ["Whole Tree Photo", (r) => r.photos.whole],
   ["Leaf Photo", (r) => r.photos.leaf],
-  ["Bark Photo", (r) => r.photos.bark],
+  ["Third Photo", (r) => THIRD_KINDS.map((k) => r.photos[k]).find(Boolean)],
+  ["Third Photo Type", (r) => THIRD_KINDS.find((k) => r.photos[k])],
 ];
 const STATUS_EXPORT = { partial: "Started", done: "Complete", missing: "Not found", todo: "", deleted: "Deleted" };
 

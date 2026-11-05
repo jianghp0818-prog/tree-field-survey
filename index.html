@@ -139,29 +139,34 @@
         <input id="f-corrected" class="input" autocomplete="off" placeholder="e.g. the number on the tree tag">
       </label>
       <div class="photos">
-        <div class="photo-slot" data-kind="whole">
-          <div class="thumb"><span>Whole tree</span><img alt=""></div>
+        <div class="photo-slot" data-slot="whole">
+          <label class="thumb"><span class="thumb-label"><b>Whole tree</b><small>Tap to take a photo</small></span><img alt="">
+            <input type="file" accept="image/*" capture="environment" hidden></label>
           <div class="photo-btns">
-            <label class="btn small">Camera<input type="file" accept="image/*" capture="environment" hidden></label>
-            <label class="btn small">Gallery<input type="file" accept="image/*" hidden></label>
-            <button class="btn small ghost" data-remove>Remove</button>
+            <label class="btn small ghost">Gallery<input type="file" accept="image/*" hidden></label>
+            <button class="btn small ghost" type="button" data-remove>Remove</button>
           </div>
         </div>
-        <div class="photo-slot" data-kind="leaf">
-          <div class="thumb"><span>Leaf</span><img alt=""></div>
+        <div class="photo-slot" data-slot="leaf">
+          <label class="thumb"><span class="thumb-label"><b>Leaf</b><small>Tap to take a photo</small></span><img alt="">
+            <input type="file" accept="image/*" capture="environment" hidden></label>
           <div class="photo-btns">
-            <label class="btn small">Camera<input type="file" accept="image/*" capture="environment" hidden></label>
-            <label class="btn small">Gallery<input type="file" accept="image/*" hidden></label>
-            <button class="btn small ghost" data-remove>Remove</button>
+            <label class="btn small ghost">Gallery<input type="file" accept="image/*" hidden></label>
+            <button class="btn small ghost" type="button" data-remove>Remove</button>
           </div>
         </div>
-        <div class="photo-slot" data-kind="bark">
-          <div class="thumb"><span>Bark</span><img alt=""></div>
+        <div class="photo-slot" data-slot="third">
+          <label class="thumb"><span class="thumb-label"><b>Bark</b><small>Tap to take a photo</small></span><img alt="">
+            <input type="file" accept="image/*" capture="environment" hidden></label>
           <div class="photo-btns">
-            <label class="btn small">Camera<input type="file" accept="image/*" capture="environment" hidden></label>
-            <label class="btn small">Gallery<input type="file" accept="image/*" hidden></label>
-            <button class="btn small ghost" data-remove>Remove</button>
+            <label class="btn small ghost">Gallery<input type="file" accept="image/*" hidden></label>
+            <button class="btn small ghost" type="button" data-remove>Remove</button>
           </div>
+        </div>
+      </div>
+      <div class="third-row"><span>Third photo</span>
+        <div class="third-type" id="third-type">
+          <button type="button" data-type="flower">Flower</button><button type="button" data-type="fruit">Fruit</button><button type="button" data-type="bark">Bark</button>
         </div>
       </div>
 
@@ -176,6 +181,7 @@
         <button class="btn small" id="f-identify" type="button">Identify online (Pl@ntNet)</button>
         <span id="f-identify-note" class="muted small"></span>
         <ul id="id-results" class="id-results" hidden></ul>
+        <div id="id-hints" class="small" hidden></div>
         <div id="id-credit" class="muted small" hidden>Identification by Pl@ntNet (plantnet.org). Suggestions only:
           the match rate is the model's confidence, not a guarantee.</div>
       </div>
